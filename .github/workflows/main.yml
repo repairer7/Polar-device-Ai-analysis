@@ -29,4 +29,4 @@ jobs:
           BARK_KEY: ${{ secrets.BARK_KEY }}
           BARK_HOST: ${{ secrets.BARK_HOST }}
         run: |
-          python main-gemini.py
+          python main.py
