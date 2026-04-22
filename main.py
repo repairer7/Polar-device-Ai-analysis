@@ -14,7 +14,7 @@ SAVE_DIR = "/opt/polar/"
 
 # 初始化最新的 Gemini Client
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_ID = "models/gemini-2.5-pro"
+MODEL_ID = "models/gemini-3-flash-preview"
 
 HEADERS = {
     'Accept': 'application/json',
