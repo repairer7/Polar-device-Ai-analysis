@@ -14,7 +14,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 
 # 初始化最新的 Gemini Client
 client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_ID = "models/gemini-3-flash-preview"
+MODEL_ID = "models/gemini-2.5-flash"
 
 HEADERS = {
     'Accept': 'application/json',
