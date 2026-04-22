@@ -11,7 +11,6 @@ from bark_push import bark_push
 # --- 配置 ---
 POLAR_TOKEN = os.environ.get("POLAR_TOKEN")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-SAVE_DIR = "/opt/polar/"
 
 # 初始化最新的 Gemini Client
 client = genai.Client(api_key=GEMINI_API_KEY)
@@ -24,6 +23,25 @@ HEADERS = {
 BASE_URL = "https://www.polaraccesslink.com/v3"
 
 
+# ---------------------------------------------------------
+# ⭐ Bark 推送重试包装函数（指数退避）
+# ---------------------------------------------------------
+def bark_push_with_retry(title, body, bark_key, max_retries=5):
+    for attempt in range(max_retries):
+        success = bark_push(title, body, bark_key)
+        if success:
+            return True
+
+        wait = 2 ** attempt
+        print(f"⚠️ Bark 推送失败，第 {attempt+1} 次重试，等待 {wait}s...")
+        time.sleep(wait)
+
+    return False
+
+
+# ---------------------------------------------------------
+# ⭐ Gemini 分析（带指数退避 retry）
+# ---------------------------------------------------------
 def analyze_with_gemini(health_data):
     """使用 Gemini 生成约 3.5KB 的专业健康报告（带自动重试）"""
     prompt = f"""
@@ -70,8 +88,7 @@ def analyze_with_gemini(health_data):
 {json.dumps(health_data, indent=2, ensure_ascii=False)}
 """
 
-    # ----------- ⭐ 指数退避重试（最多 5 次） -----------
-    max_retries = 3
+    max_retries = 5
 
     for attempt in range(max_retries):
         try:
@@ -94,10 +111,12 @@ def analyze_with_gemini(health_data):
             # 其他错误直接返回
             return f"Gemini 分析出错: {err}"
 
-    # 多次重试失败
     return "Gemini 分析出错: 多次重试后仍然 503，请稍后再试。"
 
 
+# ---------------------------------------------------------
+# ⭐ 主流程
+# ---------------------------------------------------------
 def main():
     now = datetime.now()
     today_str = now.strftime('%Y-%m-%d')
@@ -130,10 +149,11 @@ def main():
     # 生成 Bark 标题
     title = f"{now.year}年{now.month}月{now.day}日健康监测分析"
 
-    # ⭐ 从环境变量读取 BARK_KEY
+    # 从环境变量读取 BARK_KEY
     bark_key = os.environ.get("BARK_KEY")
 
-    success = bark_push(title, analysis_report, bark_key)
+    # ⭐ 使用带 retry 的 Bark 推送
+    success = bark_push_with_retry(title, analysis_report, bark_key)
 
     if success:
         print("Bark 推送成功！")
