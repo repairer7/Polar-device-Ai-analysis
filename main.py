@@ -1,5 +1,6 @@
 import json
 import os
+import time
 from google import genai  # 注意：这里改成了新的导入方式
 from datetime import datetime, timedelta
 from sleep_sync import fetch_sleep_data
@@ -22,8 +23,9 @@ HEADERS = {
 }
 BASE_URL = "https://www.polaraccesslink.com/v3"
 
+
 def analyze_with_gemini(health_data):
-    """使用 Gemini 生成约 3.5KB 的专业健康报告"""
+    """使用 Gemini 生成约 3.5KB 的专业健康报告（带自动重试）"""
     prompt = f"""
 你是一名专业的健康管理专家。请基于以下 Polar 运动手表的 24 小时监控数据，
 生成一份 **结构完整、专业、可读性强、长度控制在 3.0KB–3.8KB 之间** 的健康分析报告。
@@ -67,14 +69,34 @@ def analyze_with_gemini(health_data):
 以下是原始数据：
 {json.dumps(health_data, indent=2, ensure_ascii=False)}
 """
-    try:
-        response = client.models.generate_content(
-            model=MODEL_ID,
-            contents=prompt
-        )
-        return response.text
-    except Exception as e:
-        return f"Gemini 分析出错: {str(e)}"
+
+    # ----------- ⭐ 指数退避重试（最多 5 次） -----------
+    max_retries = 3
+
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model=MODEL_ID,
+                contents=prompt
+            )
+            return response.text
+
+        except Exception as e:
+            err = str(e)
+
+            # 只对 503 做重试
+            if "503" in err or "UNAVAILABLE" in err:
+                wait = 2 ** attempt
+                print(f"⚠️ Gemini 503 服务器过载，第 {attempt+1} 次重试，等待 {wait}s...")
+                time.sleep(wait)
+                continue
+
+            # 其他错误直接返回
+            return f"Gemini 分析出错: {err}"
+
+    # 多次重试失败
+    return "Gemini 分析出错: 多次重试后仍然 503，请稍后再试。"
+
 
 def main():
     now = datetime.now()
@@ -108,7 +130,7 @@ def main():
     # 生成 Bark 标题
     title = f"{now.year}年{now.month}月{now.day}日健康监测分析"
 
-    # ⭐ 从环境变量读取 BARK_KEY（你要求的第三处替换）
+    # ⭐ 从环境变量读取 BARK_KEY
     bark_key = os.environ.get("BARK_KEY")
 
     success = bark_push(title, analysis_report, bark_key)
@@ -117,6 +139,7 @@ def main():
         print("Bark 推送成功！")
     else:
         print("Bark 推送失败！")
+
 
 if __name__ == "__main__":
     main()
