@@ -1,4 +1,4 @@
-name: Polar Health Sync & Gemini Analysis
+name: Polar Health Sync & OpenAI Analysis
 
 on:
   workflow_dispatch: 
@@ -25,7 +25,8 @@ jobs:
         env:
           # 将 GitHub Secrets 映射为当前步骤的环境变量
           POLAR_TOKEN: ${{ secrets.POLAR_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ secrets.OPENAI_BASE_URL }}
           BARK_KEY: ${{ secrets.BARK_KEY }}
           BARK_HOST: ${{ secrets.BARK_HOST }}
         run: |

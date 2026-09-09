@@ -1,8 +1,8 @@
 # Polar Device AI Analysis
 
-基于 Polar AccessLink API 和 Gemini 的健康数据分析工具。
+基于 Polar AccessLink API 和 OpenAI 的健康数据分析工具。
 
-项目从 Polar 健康监测设备同步睡眠、连续心率、活动量和 Nightly Recharge 数据，将指定时间范围内的健康数据交给 Gemini 进行分析，并通过 Bark 推送一份适合手机阅读的中文健康报告。
+项目从 Polar 健康监测设备同步睡眠、连续心率、活动量和 Nightly Recharge 数据，将指定时间范围内的健康数据交给 OpenAI 进行分析，并通过 Bark 推送一份适合手机阅读的中文健康报告。
 
 ## 功能特性
 
@@ -10,9 +10,9 @@
 - 同步日常连续心率数据
 - 同步活动和步数数据
 - 同步 Nightly Recharge 数据
-- 使用 Gemini 生成结构化健康分析和生活建议
+- 使用 OpenAI 生成结构化健康分析和生活建议
 - 通过 Bark 推送分析报告
-- 对 Bark 推送和 Gemini 请求进行失败重试
+- 对 Bark 推送和 OpenAI 请求进行失败重试
 - 使用 GitHub Actions 执行，无需额外服务器
 
 ## 数据分析范围
@@ -32,7 +32,7 @@
 | 活动 | 步数和活动样本 | 严格过滤到指定时间范围后统计 |
 | Nightly Recharge | HRV、呼吸率、ANS Charge 和状态 | 获取当天的 Nightly Recharge 数据 |
 
-注意：代码中的连续心率数据是日常监测数据，不包含运动心率。Gemini 提示词会要求按照静息或日常活动心率进行解读。
+注意：代码中的连续心率数据是日常监测数据，不包含运动心率。OpenAI 提示词会要求按照静息或日常活动心率进行解读。
 
 ## 项目结构
 
@@ -59,11 +59,11 @@
 2. 调用 Polar AccessLink API 获取健康数据
 3. 过滤并统计 21:00 到次日 20:59 的有效数据
 4. 组装睡眠、Nightly Recharge、心率和活动摘要
-5. 将摘要和原始数据交给 Gemini
+5. 将摘要和原始数据交给 OpenAI
 6. 生成中文纯文本健康分析报告
 7. 通过 Bark 推送报告
 
-Gemini 生成的报告包含以下内容：
+OpenAI 生成的报告包含以下内容：
 
 - 睡眠质量分析
 - Nightly Recharge 分析
@@ -93,18 +93,19 @@ Settings → Secrets and variables → Actions → New repository secret
 | 名称 | 说明 | 示例 |
 | --- | --- | --- |
 | `POLAR_TOKEN` | Polar AccessLink API 访问令牌 | `your-polar-token` |
-| `GEMINI_API_KEY` | Google Gemini API Key | `your-gemini-api-key` |
+| `OPENAI_API_KEY` | OpenAI API Key | `your-openai-api-key` |
+| `OPENAI_BASE_URL` | (可选) 自建中转站等自定义 API 地址 | `https://api.your-proxy.com/v1` |
 | `BARK_HOST` | Bark 服务地址或域名 | `https://api.day.app` |
 | `BARK_KEY` | Bark 设备 Key | `your-bark-key` |
 
-代码会从环境变量读取以上配置。请不要将 Polar Token、Gemini API Key 或 Bark Key 直接写入代码。
+代码会从环境变量读取以上配置。请不要将 Polar Token、OpenAI API Key 或 Bark Key 直接写入代码。
 
 ### 3. 手动执行工作流
 
 进入仓库的 **Actions** 页面，选择：
 
 ```text
-Polar Health Sync & Gemini Analysis
+Polar Health Sync & OpenAI Analysis
 ```
 
 点击：
@@ -117,7 +118,7 @@ Run workflow
 
 ### 4. 查看结果
 
-- 在 GitHub Actions 日志中查看数据同步、Gemini 分析和 Bark 推送过程
+- 在 GitHub Actions 日志中查看数据同步、OpenAI 分析和 Bark 推送过程
 - 在 Bark 应用中查看最终健康报告
 - 如果执行失败，可根据 Actions 日志定位 API、权限或推送问题
 
@@ -127,9 +128,9 @@ Run workflow
 
 - Python 3.10 或更高版本
 - 有效的 Polar AccessLink API Token
-- 可用的 Gemini API Key
+- 可用的 OpenAI API Key
 - Bark 设备 Key
-- 能够访问 Polar、Google Gemini 和 Bark 服务的网络环境
+- 能够访问 Polar、OpenAI 和 Bark 服务的网络环境
 
 ### 安装依赖
 
@@ -144,7 +145,8 @@ Linux/macOS：
 
 ```bash
 export POLAR_TOKEN="your-polar-token"
-export GEMINI_API_KEY="your-gemini-api-key"
+export OPENAI_API_KEY="your-openai-api-key"
+export OPENAI_BASE_URL="https://api.your-proxy.com/v1" # 可选，填入中转站地址
 export BARK_HOST="https://api.day.app"
 export BARK_KEY="your-bark-key"
 ```
@@ -153,7 +155,8 @@ Windows PowerShell：
 
 ```powershell
 $env:POLAR_TOKEN="your-polar-token"
-$env:GEMINI_API_KEY="your-gemini-api-key"
+$env:OPENAI_API_KEY="your-openai-api-key"
+$env:OPENAI_BASE_URL="https://api.your-proxy.com/v1" # 可选，填入中转站地址
 $env:BARK_HOST="https://api.day.app"
 $env:BARK_KEY="your-bark-key"
 ```
@@ -181,17 +184,17 @@ https://www.polaraccesslink.com/v3
 - 活动样本数据
 - Nightly Recharge 数据
 
-如果某类数据暂时没有记录，程序会返回空摘要，Gemini 仍可能基于其他可用数据生成报告。
+如果某类数据暂时没有记录，程序会返回空摘要，OpenAI 仍可能基于其他可用数据生成报告。
 
-### Gemini
+### OpenAI
 
-当前程序使用 Google Gen AI SDK，并配置了以下模型：
+当前程序使用 OpenAI Python SDK，并配置了以下模型：
 
 ```python
-models/gemini-3-flash-preview
+gpt-4o-mini
 ```
 
-如果该模型在你的 API 账号或地区不可用，需要根据 Gemini API 当前可用模型修改 `main.py` 中的 `MODEL_ID`。
+如果该模型在你的 API 账号或地区不可用，需要根据 OpenAI API 当前可用模型修改 `main.py` 中的 `MODEL_ID`。
 
 ### Bark
 
@@ -211,9 +214,9 @@ YYYY年M月D日健康监测分析
 
 ## 重试机制
 
-### Gemini 请求
+### OpenAI 请求
 
-当 Gemini 返回 `503` 或 `UNAVAILABLE` 时，程序最多重试 5 次，并使用指数退避等待。
+当 OpenAI 返回 `503` 或 `UNAVAILABLE` 时，程序最多重试 5 次，并使用指数退避等待。
 
 ### Bark 推送
 
@@ -228,19 +231,19 @@ Bark 推送失败时最多重试 5 次，等待时间依次增加：
 ## 注意事项
 
 - 当前 GitHub Actions 仅支持手动触发，没有配置 `schedule`
-- Polar API、Gemini API 和 Bark 都可能存在调用限制或服务异常
-- Polar Token 和 Gemini API Key 属于敏感凭证，应使用 GitHub Secrets 或本地环境变量保存
+- Polar API、OpenAI API 和 Bark 都可能存在调用限制或服务异常
+- Polar Token 和 OpenAI API Key 属于敏感凭证，应使用 GitHub Secrets 或本地环境变量保存
 - 睡眠、心率和活动数据缺失时，报告内容可能不完整
 - 时区由运行环境决定，GitHub Actions 默认使用 UTC；如果需要严格按照本地时间分析，建议在代码中显式处理时区
-- Gemini 生成的内容仅供健康管理参考，不能替代医生诊断或专业医疗建议
+- OpenAI 生成的内容仅供健康管理参考，不能替代医生诊断或专业医疗建议
 - 若出现持续异常心率、严重睡眠问题或其他身体不适，应及时咨询专业医疗人员
 
 ## 技术栈
 
 - Python
 - Polar AccessLink API v3
-- Google Gemini API
-- `google-genai`
+- OpenAI API
+- `openai`
 - `requests`
 - GitHub Actions
 - Bark

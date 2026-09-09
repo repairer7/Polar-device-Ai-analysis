@@ -1,7 +1,7 @@
 import json
 import os
 import time
-from google import genai
+from openai import OpenAI
 from datetime import datetime, timedelta
 
 from sleep_sync import fetch_sleep_data
@@ -13,10 +13,15 @@ from bark_push import bark_push
 
 # --- 配置 ---
 POLAR_TOKEN = os.environ.get("POLAR_TOKEN")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY")
+OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL")
 
-client = genai.Client(api_key=GEMINI_API_KEY)
-MODEL_ID = "models/gemini-3-flash-preview"
+# 如果配置了自定义的 Base URL（如中转站），则传入 base_url 参数
+if OPENAI_BASE_URL:
+    client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
+else:
+    client = OpenAI(api_key=OPENAI_API_KEY)
+MODEL_ID = "gpt-4o-mini"
 
 HEADERS = {
     'Accept': 'application/json',
@@ -42,10 +47,10 @@ def bark_push_with_retry(title, body, bark_key, max_retries=5):
 
 
 # ---------------------------------------------------------
-# ⭐ Gemini 分析（带指数退避 retry）
+# ⭐ OpenAI 分析（带指数退避 retry）
 # ---------------------------------------------------------
-def analyze_with_gemini(health_data):
-    """使用 Gemini 生成精简版健康报告（纯文本，无 Markdown，无符号）"""
+def analyze_with_openai(health_data):
+    """使用 OpenAI 生成精简版健康报告（纯文本，无 Markdown，无符号）"""
 
     prompt = f"""
 你是一名专业的健康管理专家。请基于以下 Polar 运动手表的 24 小时监控数据，
@@ -102,24 +107,22 @@ Nightly Recharge（ANS + HRV + 呼吸率）
 
     for attempt in range(max_retries):
         try:
-            response = client.models.generate_content(
+            response = client.chat.completions.create(
                 model=MODEL_ID,
-                contents=prompt
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
             )
-            return response.text
+            return response.choices[0].message.content
 
         except Exception as e:
             err = str(e)
 
-            if "503" in err or "UNAVAILABLE" in err:
-                wait = 2 ** attempt
-                print(f"⚠️ Gemini 503 服务器过载，第 {attempt+1} 次重试，等待 {wait}s...")
-                time.sleep(wait)
-                continue
+            wait = 2 ** attempt
+            print(f"⚠️ OpenAI 请求出错，第 {attempt+1} 次重试，等待 {wait}s... 错误: {err}")
+            time.sleep(wait)
 
-            return f"Gemini 分析出错: {err}"
-
-    return "Gemini 分析出错: 多次重试后仍然 503，请稍后再试。"
+    return "OpenAI 分析出错: 多次重试后仍然失败，请稍后再试。"
 
 
 # ---------------------------------------------------------
@@ -130,7 +133,7 @@ def main():
     today_str = now.strftime('%Y-%m-%d')
     yesterday_str = (now - timedelta(days=1)).strftime('%Y-%m-%d')
 
-    print(f"--- 正在执行清洗与 Gemini AI 分析 (区间: 21:00 - 20:59) ---")
+    print(f"--- 正在执行清洗与 OpenAI 分析 (区间: 21:00 - 20:59) ---")
 
     # 1. 获取数据
     sleep_results = fetch_sleep_data(BASE_URL, HEADERS, today_str)
@@ -155,8 +158,8 @@ def main():
     }
 
     # 3. 分析与推送
-    print("正在连接 Gemini AI 进行深度分析...")
-    analysis_report = analyze_with_gemini(health_payload)
+    print("正在连接 OpenAI 进行深度分析...")
+    analysis_report = analyze_with_openai(health_payload)
 
     title = f"{now.year}年{now.month}月{now.day}日健康监测分析"
     bark_key = os.environ.get("BARK_KEY")
