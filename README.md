@@ -191,7 +191,7 @@ https://www.polaraccesslink.com/v3
 当前程序使用 OpenAI Python SDK，并配置了以下模型：
 
 ```python
-gpt-4o-mini
+gpt-5.6-luna
 ```
 
 如果该模型在你的 API 账号或地区不可用，需要根据 OpenAI API 当前可用模型修改 `main.py` 中的 `MODEL_ID`。
