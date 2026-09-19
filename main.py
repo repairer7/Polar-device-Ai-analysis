@@ -21,7 +21,7 @@ if OPENAI_BASE_URL:
     client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
 else:
     client = OpenAI(api_key=OPENAI_API_KEY)
-MODEL_ID = "gpt-5.6-luna"
+MODEL_ID = "sensenova-6.8-flash-lite"
 
 HEADERS = {
     'Accept': 'application/json',
