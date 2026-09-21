@@ -21,7 +21,7 @@ if OPENAI_BASE_URL:
     client = OpenAI(api_key=OPENAI_API_KEY, base_url=OPENAI_BASE_URL)
 else:
     client = OpenAI(api_key=OPENAI_API_KEY)
-MODEL_ID = "deepseek-v4-flash"
+MODEL_ID = "cn:deepseek-v4.1-flash"
 
 HEADERS = {
     'Accept': 'application/json',
