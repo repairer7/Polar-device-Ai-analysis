@@ -101,26 +101,27 @@ def fetch_activity_data(base_url, headers, today_str, yesterday_str):
     inactivity_stamps = []
     seen_inactivity = set()
 
-    def _collect_from_raw(raw):
+    def _collect_from_raw(raw, collect_steps=True):
         for entry in _extract_day_containers(raw):
             # 1. 步数样本
-            steps_block = entry.get("steps") or {}
-            for s in steps_block.get("samples", []):
-                ts = s.get("timestamp")
-                ts_dt = parse_iso_dt(ts, naive_is_utc=False, target_tz=BJT)
-                if not ts_dt or not (start_dt <= ts_dt <= end_dt):
-                    continue
-                key = ts_dt.isoformat()
-                if key in seen_steps:
-                    continue
-                seen_steps.add(key)
-                step_val = s.get("steps") or 0
-                combined_samples.append(s)
-                timed_step_samples.append({
-                    "dt": ts_dt,
-                    "time": ts_dt.strftime("%H:%M"),
-                    "steps": step_val,
-                })
+            if collect_steps:
+                steps_block = entry.get("steps") or {}
+                for s in steps_block.get("samples", []):
+                    ts = s.get("timestamp")
+                    ts_dt = parse_iso_dt(ts, naive_is_utc=False, target_tz=BJT)
+                    if not ts_dt or not (start_dt <= ts_dt <= end_dt):
+                        continue
+                    key = ts_dt.isoformat()
+                    if key in seen_steps:
+                        continue
+                    seen_steps.add(key)
+                    step_val = s.get("steps") or 0
+                    combined_samples.append(s)
+                    timed_step_samples.append({
+                        "dt": ts_dt,
+                        "time": ts_dt.strftime("%H:%M"),
+                        "steps": step_val,
+                    })
 
             # 2. 活动强度区间样本
             zones_block = entry.get("activity_zones") or {}
@@ -137,8 +138,10 @@ def fetch_activity_data(base_url, headers, today_str, yesterday_str):
                 zone_counts[zone_name] = zone_counts.get(zone_name, 0) + 1
 
             # 3. 久坐提醒时间戳
-            for st in entry.get("inactivity_stamps", []):
-                ts = st.get("stamp") if isinstance(st, dict) else st
+            raw_stamps = entry.get("inactivity_stamps") or []
+            stamp_items = raw_stamps.get("samples", []) if isinstance(raw_stamps, dict) else raw_stamps
+            for st in stamp_items:
+                ts = (st.get("stamp") or st.get("timestamp") or st.get("time")) if isinstance(st, dict) else st
                 ts_dt = parse_iso_dt(ts, naive_is_utc=False, target_tz=BJT)
                 if not ts_dt or not (start_dt <= ts_dt <= end_dt):
                     continue
@@ -150,8 +153,8 @@ def fetch_activity_data(base_url, headers, today_str, yesterday_str):
 
     _collect_from_raw(raw_yesterday)
     _collect_from_raw(raw_today)
-    if not timed_step_samples and raw_activities:
-        _collect_from_raw(raw_activities)
+    if raw_activities:
+        _collect_from_raw(raw_activities, collect_steps=not bool(timed_step_samples))
 
     timed_step_samples.sort(key=lambda x: x["dt"])
     inactivity_stamps.sort()
@@ -181,7 +184,8 @@ def fetch_activity_data(base_url, headers, today_str, yesterday_str):
             "active_duration_str": format_duration_hm(active_sec),
             "inactive_duration_min": round(inactive_sec / 60, 1) if inactive_sec is not None else None,
             "inactive_duration_str": format_duration_hm(inactive_sec),
-            "daily_activity_score": round(daily_score, 1) if daily_score is not None else None,
+            "daily_activity_goal_pct": f"{round(daily_score, 1)}%" if daily_score is not None else None,
+            "daily_activity_goal_completion_pct": round(daily_score, 1) if daily_score is not None else None,
             "calories": target_act.get("calories"),
             "active_calories": target_act.get("active_calories"),
             "steps_official_day": target_act.get("steps"),
@@ -204,9 +208,10 @@ def fetch_activity_data(base_url, headers, today_str, yesterday_str):
         "active_windows": _summarize_active_windows(timed_step_samples),
         "zone_counts": zone_counts,
         "zone_pcts": zone_pcts,
-        "inactivity_stamps": [dt.strftime("%H:%M") for dt in inactivity_stamps],
         "daily_summary": daily_summary,
     }
+    if inactivity_stamps:
+        stats["inactivity_stamps"] = [dt.strftime("%H:%M") for dt in inactivity_stamps]
 
     return {
         "raw_yesterday": raw_yesterday,

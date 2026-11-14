@@ -42,7 +42,7 @@ def _get_openai_client():
 
 
 def _normalize_bark_text(text: str) -> str:
-    """清理模型偶发输出的 Markdown 符号与多余空行，确保 Bark 手机端紧凑展示。"""
+    """清理模型偶发输出的 Markdown 符号、多余空行及无意义占位提示，确保 Bark 手机端紧凑展示。"""
     if not text:
         return ""
     cleaned_lines = []
@@ -52,6 +52,22 @@ def _normalize_bark_text(text: str) -> str:
         line = re.sub(r"^#{1,6}\s*", "", line)
         line = re.sub(r"^[-*•]\s+", "", line)
         line = line.replace("**", "")
+        # 过滤无数据的夜间皮肤温度整行
+        if re.search(r"夜间皮肤温度.*暂无数据", line):
+            continue
+        # 剔除行内冗余缺失占位短语
+        had_placeholder = bool(
+            re.search(r"(?:具体时间点暂无明细|运动记录暂无数据|目标完成率暂无数据)", line)
+        )
+        line = re.sub(
+            r"[（(，,、;；\s]*(?:具体时间点暂无明细|运动记录暂无数据|目标完成率暂无数据)[）)]*",
+            "",
+            line,
+        )
+        line = re.sub(r"([：:])\s+", r"\1", line)
+        line = re.sub(r"\s{2,}", " ", line).strip(" ，,、;；")
+        if had_placeholder and (not line or line.endswith(("：", ":"))):
+            continue
         cleaned_lines.append(line)
     normalized = "\n".join(cleaned_lines)
     # 最多保留章节间单空行
@@ -93,13 +109,13 @@ def analyze_with_openai(health_data):
 4. 全篇总字数严格控制在 450 至 650 字之间，信息密度高、不废话，确保 Bark 通知一屏半内完整可读。
 5. 心率分析必须参考 heart_rate_analysis 中的分段统计、夜间最低心率恢复位置(sleep_hr_dynamics)及异常阶段列表(anomalies)：
    必须明确区分“静息/非活动期异常偏高、睡眠期心率偏高、非活动心率骤变”与“正常走动或运动引起的心率升高”，严禁将日常步行/运动高心率误判为静息异常。若无异常时段，请明确写明无静息或睡眠异常段。
-6. 若某项可选数据(has_data 为 false)未同步到，请在对应指标简写“暂无数据”，不要编造数字。
+6. 严禁在报告任何位置出现“暂无数据”、“暂无明细”、“未获取”、“无记录”等字样！凡是数据载荷中未提供或为空的可选指标（如皮肤温度、独立运动记录、久坐提醒具体时间点等），直接省略不写，也绝不要对缺失数据做任何分析。
 
 ----------------------------------------
 请严格按以下 4 个大章节输出：
 
 睡眠与夜间恢复分析
-纵向展示：睡眠起止与总时长、深睡与REM时长及占比、睡眠得分与连续性、HRV与呼吸率、ANS与恢复状态、夜间皮肤温度及基线偏离
+纵向展示：睡眠起止与总时长、深睡与REM时长及占比、睡眠得分与连续性、HRV与呼吸率、ANS与恢复状态（仅当数据中存在 skin_temperature 时才补充夜间皮肤温度及基线偏离，否则直接跳过）
 给出两条专业解读（每条不超过28字）
 给出两条改善建议（每条不超过22字）
 
@@ -109,12 +125,12 @@ def analyze_with_openai(health_data):
 给出两条护心与作息建议（每条不超过22字）
 
 日常活动与心肺负荷分析
-纵向展示：总步数与距离、活动千卡与目标完成率、活跃与久坐时长（含久坐提醒时间点）、运动记录与心肺负荷状态
+纵向展示：总步数与距离、活动千卡与目标完成率（使用 daily_activity_goal_pct 合并展示，如“活动千卡与目标完成率：809千卡（达成65.1%）”，不要再单独输出“活动评分”行）、活跃与久坐时长、久坐提醒（有 inactivity_stamps 时附时间点，否则仅写“久坐提醒：X次”）、心肺负荷状态（有 exercises 运动记录时一并列出，无运动记录时仅写“心肺负荷状态：...”且不要提无运动记录）
 给出两条专业解读（每条不超过28字）
 给出两条运动活动建议（每条不超过22字）
 
 生物钟清醒度与今日综合建议
-纵向展示：今日精力峰值时段与犯困低谷时段、今晚最佳入睡时间窗
+纵向展示：日间精力峰值时段与日间犯困低谷时段（若无低谷则写“日间无明显犯困低谷”）、今晚最佳入睡时间窗
 给出两条潜在健康隐患预警（每条一句话）
 给出两条综合行动建议（每条不超过22字）
 ----------------------------------------
@@ -146,6 +162,37 @@ def analyze_with_openai(health_data):
     return "OpenAI 分析出错: 多次重试后仍然失败，请稍后再试。"
 
 
+def _prune_biosensing(biosensing_summary):
+    """仅保留有真实监测数据的生物传感子项，避免空项误导大模型。"""
+    if not isinstance(biosensing_summary, dict) or not biosensing_summary.get("has_data"):
+        return None
+    pruned = {}
+    for key in ("skin_temperature", "body_temperature", "skin_contacts"):
+        sub = biosensing_summary.get(key)
+        if not isinstance(sub, dict) or not sub.get("has_data"):
+            continue
+        if key == "skin_contacts" and sub.get("off_wrist_count", 0) <= 0:
+            continue
+        pruned[key] = sub
+    if not pruned:
+        return None
+    return {"has_data": True, **pruned}
+
+
+def _prune_sleepwise(sleepwise_summary):
+    """过滤无数据的 SleepWise 子项。"""
+    if not isinstance(sleepwise_summary, dict) or not sleepwise_summary.get("has_data"):
+        return None
+    pruned = {}
+    for key in ("alertness", "circadian_bedtime"):
+        sub = sleepwise_summary.get(key)
+        if isinstance(sub, dict) and sub.get("has_data"):
+            pruned[key] = sub
+    if not pruned:
+        return None
+    return {"has_data": True, **pruned}
+
+
 def build_health_payload(
     today_str,
     yesterday_str,
@@ -159,7 +206,42 @@ def build_health_payload(
     exercises_results,
     physical_info_results,
 ):
-    """构建精简高密度的健康数据载荷供大模型分析。"""
+    """构建精简高密度的健康数据载荷供大模型分析，自动剔除无数据的可选模块。"""
+    summary = {}
+
+    optional_blocks = [
+        ("sleep", sleep_results.get("summary") if sleep_results else None),
+        ("nightly_recharge", nightly_recharge_results.get("summary") if nightly_recharge_results else None),
+        ("heart_rate_analysis", hr_results.get("stats") if hr_results else None),
+    ]
+    for name, block in optional_blocks:
+        if isinstance(block, dict) and block.get("has_data"):
+            summary[name] = block
+
+    act_stats = activity_results.get("stats") if activity_results else None
+    if isinstance(act_stats, dict) and (act_stats.get("count", 0) > 0 or (act_stats.get("daily_summary") or {}).get("has_data")):
+        act_copy = dict(act_stats)
+        if isinstance(act_copy.get("daily_summary"), dict) and not act_copy["daily_summary"].get("has_data"):
+            act_copy.pop("daily_summary", None)
+        summary["activity_stats"] = act_copy
+
+    bio_summary = _prune_biosensing(biosensing_results.get("summary") if biosensing_results else None)
+    if bio_summary:
+        summary["biosensing"] = bio_summary
+
+    sw_summary = _prune_sleepwise(sleepwise_results.get("summary") if sleepwise_results else None)
+    if sw_summary:
+        summary["sleepwise"] = sw_summary
+
+    for name, res in (
+        ("cardio_load", cardio_load_results),
+        ("exercises", exercises_results),
+        ("physical_info", physical_info_results),
+    ):
+        block = res.get("summary") if res else None
+        if isinstance(block, dict) and block.get("has_data"):
+            summary[name] = block
+
     return {
         "metadata": {
             "device": "Polar Loop",
@@ -167,17 +249,7 @@ def build_health_payload(
             "timezone": "Asia/Shanghai (UTC+8)",
             "range": f"{yesterday_str} 21:00 to {today_str} 20:59",
         },
-        "summary": {
-            "sleep": sleep_results.get("summary") if sleep_results else {"has_data": False},
-            "nightly_recharge": nightly_recharge_results.get("summary") if nightly_recharge_results else {"has_data": False},
-            "heart_rate_analysis": hr_results.get("stats") if hr_results else {"has_data": False},
-            "activity_stats": activity_results.get("stats") if activity_results else {},
-            "biosensing": biosensing_results.get("summary") if biosensing_results else {"has_data": False},
-            "sleepwise": sleepwise_results.get("summary") if sleepwise_results else {"has_data": False},
-            "cardio_load": cardio_load_results.get("summary") if cardio_load_results else {"has_data": False},
-            "exercises": exercises_results.get("summary") if exercises_results else {"has_data": False},
-            "physical_info": physical_info_results.get("summary") if physical_info_results else {"has_data": False},
-        },
+        "summary": summary,
     }
 
 
@@ -193,16 +265,23 @@ def main():
 
     # 1. 获取全维度数据
     sleep_results = fetch_sleep_data(BASE_URL, HEADERS, today_str)
+    sleep_summary = sleep_results.get("summary") if sleep_results else {}
+
     nightly_recharge_results = fetch_nightly_recharge(BASE_URL, HEADERS, today_str)
     activity_results = fetch_activity_data(BASE_URL, HEADERS, today_str, yesterday_str)
     physical_info_results = fetch_physical_info(BASE_URL, HEADERS)
+    physical_info_summary = physical_info_results.get("summary") if physical_info_results else {}
+
     biosensing_results = fetch_biosensing_data(BASE_URL, HEADERS, today_str, yesterday_str)
-    sleepwise_results = fetch_sleepwise_data(BASE_URL, HEADERS, today_str, yesterday_str)
+    sleepwise_results = fetch_sleepwise_data(
+        BASE_URL,
+        HEADERS,
+        today_str,
+        yesterday_str,
+        sleep_summary=sleep_summary,
+    )
     cardio_load_results = fetch_cardio_load_data(BASE_URL, HEADERS, today_str, yesterday_str)
     exercises_results = fetch_exercises_data(BASE_URL, HEADERS, today_str, yesterday_str)
-
-    sleep_summary = sleep_results.get("summary") if sleep_results else {}
-    physical_info_summary = physical_info_results.get("summary") if physical_info_results else {}
 
     # 2. 跨模态心率变化与异常阶段深度检测
     hr_results = fetch_hr_data(

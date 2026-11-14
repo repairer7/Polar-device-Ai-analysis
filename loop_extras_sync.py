@@ -270,7 +270,7 @@ def fetch_biosensing_data(base_url, headers, today_str, yesterday_str):
     }
 
 
-def fetch_sleepwise_data(base_url, headers, today_str, yesterday_str):
+def fetch_sleepwise_data(base_url, headers, today_str, yesterday_str, sleep_summary=None):
     """获取 SleepWise 日间清醒度预测与生物钟最佳入睡时间窗。"""
     alert_raw = safe_get_json(f"{base_url}/users/sleepwise/alertness", headers, label="sleepwise-alertness")
     bedtime_raw = safe_get_json(f"{base_url}/users/sleepwise/circadian-bedtime", headers, label="sleepwise-circadian")
@@ -290,18 +290,41 @@ def fetch_sleepwise_data(base_url, headers, today_str, yesterday_str):
         offset = target.get("sleep_timezone_offset_minutes")
         local_tz = timezone(timedelta(minutes=offset)) if offset is not None else BJT
 
+        awake_start_dt = parse_iso_dt(f"{today_str}T07:00:00", target_tz=local_tz)
+        if isinstance(sleep_summary, dict):
+            wake_str = sleep_summary.get("end_time") or sleep_summary.get("sleep_end_time")
+            wake_dt = parse_iso_dt(wake_str, target_tz=local_tz)
+            if wake_dt and awake_start_dt:
+                awake_start_dt = awake_start_dt.replace(
+                    hour=wake_dt.hour,
+                    minute=wake_dt.minute,
+                    second=0,
+                    microsecond=0,
+                )
+
         peak_slots = []
         low_slots = []
+        daytime_slot_count = 0
         for h in target.get("hourly_data", []):
             s_dt = parse_iso_dt(h.get("start_time"), naive_is_utc=True, target_tz=local_tz)
             e_dt = parse_iso_dt(h.get("end_time"), naive_is_utc=True, target_tz=local_tz)
             if not s_dt or not e_dt:
                 continue
+            if s_dt.strftime("%Y-%m-%d") != today_str:
+                continue
+            if (awake_start_dt and s_dt < awake_start_dt) or s_dt.hour >= 21:
+                continue
+
+            daytime_slot_count += 1
             lvl = h.get("alertness_level", "")
             if lvl in ("ALERTNESS_LEVEL_HIGH", "ALERTNESS_LEVEL_VERY_HIGH"):
                 peak_slots.append((s_dt, e_dt))
             elif lvl in ("ALERTNESS_LEVEL_LOW", "ALERTNESS_LEVEL_VERY_LOW", "ALERTNESS_LEVEL_MINIMAL"):
                 low_slots.append((s_dt, e_dt))
+
+        low_hours = _group_hour_ranges(low_slots)
+        if daytime_slot_count > 0 and not low_hours:
+            low_hours = ["日间精力平稳，无明显犯困低谷"]
 
         cls_key = target.get("grade_classification")
         inertia_key = target.get("sleep_inertia")
@@ -311,7 +334,7 @@ def fetch_sleepwise_data(base_url, headers, today_str, yesterday_str):
             "grade_classification": ALERTNESS_CLASS_MAP.get(cls_key, cls_key),
             "sleep_inertia": SLEEP_INERTIA_MAP.get(inertia_key, inertia_key),
             "peak_alertness_hours": _group_hour_ranges(peak_slots),
-            "low_alertness_hours": _group_hour_ranges(low_slots),
+            "low_alertness_hours": low_hours,
         }
 
     circadian_summary = {"has_data": False}
