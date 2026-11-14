@@ -1,38 +1,45 @@
-# Polar Device AI Analysis
+# Polar Device AI Analysis (Polar Loop 深度版)
 
-基于 Polar AccessLink API 和 OpenAI 的健康数据分析工具。
+基于 Polar AccessLink API v3 和 OpenAI 兼容大模型接口的 Polar Loop 全维度健康数据分析工具。
 
-项目从 Polar 健康监测设备同步睡眠、连续心率、活动量和 Nightly Recharge 数据，将指定时间范围内的健康数据交给 OpenAI 进行分析，并通过 Bark 推送一份适合手机阅读的中文健康报告。
+项目从 Polar Loop 同步睡眠分期、连续心率、活动与久坐、Nightly Recharge、夜间皮肤温度（Elixir™）、SleepWise™ 清醒度与生物钟节律、心肺负荷（Cardio Load）、运动记录以及个人生理基准，结合跨模态规则引擎对**心率变化曲线与异常时段**进行精准定位，最终生成适合手机 Bark 阅读的紧凑中文健康报告。
 
 ## 功能特性
 
-- 同步 Polar 睡眠数据
-- 同步日常连续心率数据
-- 同步活动和步数数据
-- 同步 Nightly Recharge 数据
-- 使用 OpenAI 生成结构化健康分析和生活建议
-- 通过 Bark 推送分析报告
-- 对 Bark 推送和 OpenAI 请求进行失败重试
-- 使用 GitHub Actions 执行，无需额外服务器
+- **Polar Loop 全维度数据同步**：
+  - 睡眠结构分析（深睡/浅睡/REM 时长与占比、夜醒中断、睡眠周期、连续性及三大子评分）
+  - 连续心率深度分析（睡前/睡眠/上午/下午/傍晚 5 段对比、24 小时逐时曲线、夜间最低心率恢复动力学、静息/睡眠/突变异常阶段自动筛查）
+  - 活动与久坐监测（步数、活动强度区间分布、久坐提醒时间戳、活跃时长、消耗千卡与目标完成率）
+  - Nightly Recharge 夜间恢复（ANS Charge、HRV 整夜波动趋势、呼吸率稳定性）
+  - Elixir™ 生物传感（夜间睡眠皮肤温度及 28 天个人基线偏离值、体温周期与佩戴接触状态）
+  - SleepWise™ 生物钟预测（今日清醒度评分、精力峰值/犯困低谷时段、今晚最佳入睡时间窗）
+  - 训练与心肺负荷（Cardio Load、Strain 近期疲劳度、Tolerance 长期耐受度及运动记录自动对齐）
+  - 个人生理基准（自动读取 `physical-info` 静息心率与最大心率，动态设定异常阈值）
+- **跨模态心率异常检测**：自动对齐睡眠区间、步数采样和运动记录，区分“静息非活动期心率偏高 / 睡眠心率偏高 / 非活动骤升骤降”与“正常步行或运动引起的生理性升高”。
+- **严格北京时间（UTC+8）**：显式锁定东八区时间，避免 GitHub Actions（UTC 环境）出现跨日与 `21:00` 边界偏移。
+- **Bark POST 推送**：优先采用 `POST /push` JSON 协议发送报告（避免长文本 URL 截断或 414 错误），并在需要时自动回退兼容 `GET` 模式。
+- **高可用重试与降级**：OpenAI 与 Bark 均支持指数退避重试；部分可选 Polar 接口无数据时安全降级，不中断整体报告。
 
 ## 数据分析范围
 
-程序默认以当天日期为报告日期，分析时间区间为：
+程序默认以**北京时间（UTC+8）**当天日期为报告日期，分析时间区间为：
 
 ```text
-前一天 21:00 至当天 20:59
+前一天 21:00 至当天 20:59 (Asia/Shanghai)
 ```
 
 各类数据的处理方式如下：
 
-| 数据类型 | 获取内容 | 处理方式 |
+| 数据类型 | 接口端点 | 获取与处理方式 |
 | --- | --- | --- |
-| 睡眠 | 睡眠开始时间、结束时间、睡眠得分 | 匹配当天的睡眠记录 |
-| 连续心率 | 平均、最高、最低心率和样本数量 | 合并前一天和当天数据，过滤 21:00 分界线外的数据和心率为 0 的样本 |
-| 活动 | 步数和活动样本 | 严格过滤到指定时间范围后统计 |
-| Nightly Recharge | HRV、呼吸率、ANS Charge 和状态 | 获取当天的 Nightly Recharge 数据 |
-
-注意：代码中的连续心率数据是日常监测数据，不包含运动心率。OpenAI 提示词会要求按照静息或日常活动心率进行解读。
+| 睡眠 | `/v3/users/sleep` | 提取睡眠起止、深睡/REM/浅睡时长及占比、中断时长、连续性、三大子评分及睡眠期心率 |
+| 连续心率 | `/v3/users/continuous-heart-rate/{date}` | 合并前一天 21:00 后与当天 21:00 前样本，结合个人静息基准、睡眠窗、步数与运动记录，检测异常高心率/低心率/突变阶段与夜间最低点恢复位置 |
+| 活动与久坐 | `/v3/users/activities/samples` & `/v3/users/activities` | 统计区间步数、活跃时段、活动强度区间(`SEDENTARY`/`LIGHT`/`MODERATE`/`VIGOROUS`)、久坐提醒时刻及日卡路里/距离/达成率 |
+| Nightly Recharge | `/v3/users/nightly-recharge/{date}` | 获取 HRV、呼吸率、ANS Charge 及状态，提炼前后半夜 HRV 与呼吸率波动趋势 |
+| 生物传感 (Elixir™) | `/v3/users/biosensing/skintemperature` 等 | 获取夜间睡眠皮肤温度及相对 28 天基线偏离℃、体温汇总与腕部贴合状态 |
+| SleepWise™ | `/v3/users/sleepwise/alertness` & `circadian-bedtime` | 预测今日精力高精力时段与困倦低谷时段、今晚最佳入睡时间窗 |
+| 心肺负荷与运动 | `/v3/users/cardio-load` & `/v3/exercises` | 获取 Cardio Load / Strain / Tolerance 状态及当日训练记录（并用于排除运动心率误报） |
+| 生理基准 | `/v3/users/physical-info` | 读取个人静息心率、最大心率、VO2max 等用于动态计算心率异常阈值 |
 
 ## 项目结构
 
@@ -41,38 +48,33 @@
 ├── .github/
 │   └── workflows/
 │       └── main.yml              # GitHub Actions 工作流
-├── main.py                       # 主程序，负责同步、分析和推送
-├── sleep_sync.py                 # Polar 睡眠数据同步
-├── hr_sync.py                    # Polar 连续心率数据同步
-├── activity_sync.py              # Polar 活动数据同步
-├── nightly_recharge.py           # Polar Nightly Recharge 数据同步
-├── bark_push.py                  # Bark 推送封装
+├── main.py                       # 主程序，负责北京时间调度、数据聚合、AI 分析与 Bark 推送
+├── sleep_sync.py                 # Polar 睡眠数据及分期结构同步
+├── hr_sync.py                    # Polar 连续心率同步与跨模态心率异常阶段检测引擎
+├── activity_sync.py              # Polar 活动样本、强度区间与每日活动汇总同步
+├── nightly_recharge.py           # Polar Nightly Recharge 与夜间 HRV/呼吸趋势提炼
+├── loop_extras_sync.py           # Polar Loop 扩展接口（皮肤温度、SleepWise、心肺负荷、运动与生理基准）
+├── bark_push.py                  # Bark 推送封装（POST JSON 优先 + GET 兼容回退）
 ├── requirements.txt              # Python 依赖
-└── README1.md                   # 项目说明
+└── README.md                     # 项目说明
 ```
 
 ## 工作原理
 
-程序运行时会按以下流程执行：
+程序运行时按以下流程执行：
 
-1. 获取当前日期和前一天日期
-2. 调用 Polar AccessLink API 获取健康数据
-3. 过滤并统计 21:00 到次日 20:59 的有效数据
-4. 组装睡眠、Nightly Recharge、心率和活动摘要
-5. 将摘要和原始数据交给 OpenAI
-6. 生成中文纯文本健康分析报告
-7. 通过 Bark 推送报告
+1. 按北京时间（`UTC+8`）确定当天与前一天日期（统计区间 `前一天 21:00 - 当天 20:59`）
+2. 并行/依次拉取睡眠、Nightly Recharge、活动样本与汇总、个人生理基准、Elixir 皮肤温度、SleepWise 清醒度/生物钟、心肺负荷和运动记录
+3. 由 `hr_sync.py` 将连续心率序列与睡眠窗、同时段步数、运动记录进行跨模态对齐，识别静息异常高心率段、睡眠高心率段、非活动心率突变及夜间最低心率恢复特征
+4. 组装高密度 JSON 载荷并发送给 OpenAI 兼容模型生成 **450～650 字**的纯文本紧凑报告
+5. 通过 Bark `POST /push` 推送至手机端
 
-OpenAI 生成的报告包含以下内容：
+报告固定包含以下 4 个紧凑板块：
 
-- 睡眠质量分析
-- Nightly Recharge 分析
-- 心脏负荷分析
-- 活动水平分析
-- 潜在健康隐患
-- 综合建议
-
-报告被限制为短文本格式，适合直接在 Bark 通知中阅读。
+- **睡眠与夜间恢复分析**（含睡眠分期、HRV/呼吸率、夜间皮肤温度偏离）
+- **心率动态与异常阶段深度分析**（含 5 阶段心率对比、夜间最低点恢复评价、精确到 `HH:MM-HH:MM` 的异常时段与原因判定）
+- **日常活动与心肺负荷分析**（含步数、消耗、久坐提醒及 Cardio Load）
+- **生物钟清醒度与今日综合建议**（含今日精力峰值/低谷、今晚最佳入睡窗与健康预警）
 
 ## 使用 GitHub Actions
 
@@ -92,162 +94,35 @@ Settings → Secrets and variables → Actions → New repository secret
 
 | 名称 | 说明 | 示例 |
 | --- | --- | --- |
-| `POLAR_TOKEN` | Polar AccessLink API 访问令牌 | `your-polar-token` |
-| `OPENAI_API_KEY` | OpenAI API Key | `your-openai-api-key` |
+| `POLAR_TOKEN` | Polar AccessLink API 访问令牌（需 `accesslink.read_all` 权限） | `your-polar-token` |
+| `OPENAI_API_KEY` | OpenAI / 中转站 API Key | `your-openai-api-key` |
 | `OPENAI_BASE_URL` | (可选) 自建中转站等自定义 API 地址 | `https://api.your-proxy.com/v1` |
 | `BARK_HOST` | Bark 服务地址或域名 | `https://api.day.app` |
 | `BARK_KEY` | Bark 设备 Key | `your-bark-key` |
 
-代码会从环境变量读取以上配置。请不要将 Polar Token、OpenAI API Key 或 Bark Key 直接写入代码。
-
 ### 3. 手动执行工作流
 
-进入仓库的 **Actions** 页面，选择：
-
-```text
-Polar Health Sync & OpenAI Analysis
-```
-
-点击：
-
-```text
-Run workflow
-```
-
-当前工作流使用 `workflow_dispatch`，默认不会自动定时运行。
-
-### 4. 查看结果
-
-- 在 GitHub Actions 日志中查看数据同步、OpenAI 分析和 Bark 推送过程
-- 在 Bark 应用中查看最终健康报告
-- 如果执行失败，可根据 Actions 日志定位 API、权限或推送问题
+进入仓库的 **Actions** 页面，选择 `Polar Health Sync & OpenAI Analysis`，点击 `Run workflow`。
 
 ## 本地运行
-
-### 环境要求
-
-- Python 3.10 或更高版本
-- 有效的 Polar AccessLink API Token
-- 可用的 OpenAI API Key
-- Bark 设备 Key
-- 能够访问 Polar、OpenAI 和 Bark 服务的网络环境
-
-### 安装依赖
 
 ```bash
 python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-### 配置环境变量
-
-Linux/macOS：
-
-```bash
-export POLAR_TOKEN="your-polar-token"
-export OPENAI_API_KEY="your-openai-api-key"
-export OPENAI_BASE_URL="https://api.your-proxy.com/v1" # 可选，填入中转站地址
-export BARK_HOST="https://api.day.app"
-export BARK_KEY="your-bark-key"
-```
-
-Windows PowerShell：
+Windows PowerShell 配置环境变量并运行：
 
 ```powershell
 $env:POLAR_TOKEN="your-polar-token"
 $env:OPENAI_API_KEY="your-openai-api-key"
-$env:OPENAI_BASE_URL="https://api.your-proxy.com/v1" # 可选，填入中转站地址
+$env:OPENAI_BASE_URL="https://api.your-proxy.com/v1"
 $env:BARK_HOST="https://api.day.app"
 $env:BARK_KEY="your-bark-key"
-```
-
-运行主程序：
-
-```bash
 python main.py
 ```
 
-## API 和权限说明
-
-### Polar AccessLink
-
-程序使用 Polar AccessLink API v3，访问地址为：
-
-```text
-https://www.polaraccesslink.com/v3
-```
-
-需要确保 Token 有权访问以下数据：
-
-- 睡眠数据
-- 连续心率数据
-- 活动样本数据
-- Nightly Recharge 数据
-
-如果某类数据暂时没有记录，程序会返回空摘要，OpenAI 仍可能基于其他可用数据生成报告。
-
-### OpenAI
-
-当前程序使用 OpenAI Python SDK，并配置了以下模型：
-
-```python
-gpt-5.6-luna
-```
-
-如果该模型在你的 API 账号或地区不可用，需要根据 OpenAI API 当前可用模型修改 `main.py` 中的 `MODEL_ID`。
-
-### Bark
-
-Bark 通知使用以下参数：
-
-```text
-group=Polar
-isArchive=1
-level=active
-```
-
-通知标题格式为：
-
-```text
-YYYY年M月D日健康监测分析
-```
-
-## 重试机制
-
-### OpenAI 请求
-
-当 OpenAI 返回 `503` 或 `UNAVAILABLE` 时，程序最多重试 5 次，并使用指数退避等待。
-
-### Bark 推送
-
-Bark 推送失败时最多重试 5 次，等待时间依次增加：
-
-```text
-1 秒、2 秒、4 秒、8 秒、16 秒
-```
-
-如果多次尝试仍失败，程序会在日志中报告推送失败。
-
 ## 注意事项
 
-- 当前 GitHub Actions 仅支持手动触发，没有配置 `schedule`
-- Polar API、OpenAI API 和 Bark 都可能存在调用限制或服务异常
-- Polar Token 和 OpenAI API Key 属于敏感凭证，应使用 GitHub Secrets 或本地环境变量保存
-- 睡眠、心率和活动数据缺失时，报告内容可能不完整
-- 时区由运行环境决定，GitHub Actions 默认使用 UTC；如果需要严格按照本地时间分析，建议在代码中显式处理时区
-- OpenAI 生成的内容仅供健康管理参考，不能替代医生诊断或专业医疗建议
-- 若出现持续异常心率、严重睡眠问题或其他身体不适，应及时咨询专业医疗人员
-
-## 技术栈
-
-- Python
-- Polar AccessLink API v3
-- OpenAI API
-- `openai`
-- `requests`
-- GitHub Actions
-- Bark
-
-## 许可证
-
-本项目当前未指定开源许可证。若希望明确允许其他人使用、修改和分发代码，建议根据实际需求添加 MIT 或 Apache-2.0 等许可证。
+- 本分析报告由大模型结合传感器统计特征生成，仅供日常健康与作息管理参考，不能替代专业医疗诊断；若持续出现静息心率明显偏高、胸闷或心律异常，请及时就医。
+- 部分增强维度（如夜间皮肤温度基线偏离、SleepWise 预测）需要连续佩戴数天建立个人基线后才会有数值返回，基线建立前程序会自动标注“暂无数据”并正常运行。
